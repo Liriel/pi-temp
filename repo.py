@@ -24,6 +24,7 @@ class Repo:
         cursor.execute(QINSERT, reading)
         self.__conn.commit()
         cursor.close()
+        return cursor.lastrowid
 
 
     @property
@@ -36,6 +37,19 @@ class Repo:
 
         cursor.close()
         return readings 
+
+
+    def GetReadingById(self, readingId):
+        QSELECT = "select Id, [Date], Temperature, Humidity from Log where id=?"
+        cursor = self.__conn.cursor()
+        cursor.execute(QSELECT, (readingId,))
+        row = cursor.fetchone()
+        cursor.close()
+        if(row is None):
+            return None
+        else:
+            return Reading.FromRow(row)
+
 
 
 class Reading:

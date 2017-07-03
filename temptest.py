@@ -3,13 +3,15 @@ import Adafruit_DHT
 import RPi.GPIO as GPIO
 import sys
 import signal
-from repo import Repo
 import time
 import curses
 
-# Example using a Raspberry Pi with DHT sensor
-# connected to GPIO4
-pin = 4
+from azure.storage.table import TableService, Entity
+
+from repo import Repo
+from config import Config
+
+cfg = Config()
 
 # define CTRL+C signal handler
 def signal_handler(signal, frame):
@@ -21,19 +23,23 @@ def signal_handler(signal, frame):
 signal.signal(signal.SIGINT, signal_handler)
 
 GPIO.setmode(GPIO.BCM)
-GPIO.setup(pin, GPIO.IN, pull_up_down=GPIO.PUD_UP)
+GPIO.setup(cfg.Pin, GPIO.IN, pull_up_down=GPIO.PUD_UP)
 
 # configure database
-dbPath = "readings.db"
-print ("Initializing database %s" % dbPath)
-repo = Repo(dbPath)
-
-# measure intervall in seconds
-intervall = 20
+print ("Initializing database %s" % cfg.DbPath)
+repo = Repo(cfg.DbPath)
 
 # Sensor should be set to Adafruit_DHT.DHT11,
 # Adafruit_DHT.DHT22, or Adafruit_DHT.AM2302.
 sensor = Adafruit_DHT.DHT22
+
+# connect to azure storage
+if(cfg.Azure):
+    table_service = TableService(account_name=cfg.Account, account_key=cfg.Key)
+    table_service.create_table('Log')
+    # generate a random partition name
+    azure_part = time.strftime("%Y%m%d%H%M%S")
+    azure_key = 0
 
 try:
     # setup ncurses
@@ -64,14 +70,14 @@ try:
 
         # Try to grab a sensor reading.  Use the read_retry method which will retry up
         # to 15 times to get a sensor reading (waiting 2 seconds between each retry).
-        humidity, temperature = Adafruit_DHT.read_retry(sensor, pin)
+        humidity, temperature = Adafruit_DHT.read_retry(sensor, cfg.Pin)
         
         # Note that sometimes you won't get a reading and
         # the results will be null (because Linux can't
         # guarantee the timing of calls to read the sensor).
         # If this happens try again!
         if humidity is not None and temperature is not None:
-            repo.AddReading(temperature, humidity)
+            readingId = repo.AddReading(temperature, humidity)
 
             xOffset = 2 
             screen.addstr(7, xOffset, "Temperature: {0:0.1f}*C".format(temperature))
@@ -83,6 +89,16 @@ try:
             #screen.addstr(7, xOffset, "Humidity:")
             screen.addstr(7, xOffset, "Humidity: {0:0.1f}*C".format(humidity))
 
+            if(cfg.Azure and readingId > 0):
+                reading = repo.GetReadingById(readingId)
+                if(reading):
+                    # post values to azure table
+                    keyStr = "%05d" % azure_key 
+                    reading.PartitionKey = azure_part
+                    reading.RowKey = keyStr
+                    azure_key+=1
+                    table_service.insert_entity('Log', reading.__dict__)
+
         else:
             print('Failed to get reading. Try again!')
 
@@ -90,7 +106,7 @@ try:
         screen.border(0)
         screen.refresh()
 
-        time.sleep(intervall)
+        time.sleep(cfg.Interval)
 
 finally:
     curses.nocbreak(); screen.keypad(0); curses.echo()

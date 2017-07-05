@@ -1,0 +1,13 @@
+[Unit]
+Description=Temperature and Humidity Sensor Test
+Wants=network-online.target
+After=network-online.target
+ 
+[Service]
+WorkingDirectory=/home/pi/temptest
+ExecStart=/home/pi/temptest/temptest.py --daemon
+StandardOutput=syslog
+StandardError=syslog
+ 
+[Install]
+Alias=temptest.service
